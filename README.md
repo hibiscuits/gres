@@ -1,5 +1,5 @@
 # gres
-grep, but with replace
+grep, but with substitution
 
 for those who think that:
 
@@ -25,7 +25,7 @@ or the shorthand version,
 
 	tail log.txt | gres -g "pattern"
 
-You can even manipulate matches using {}-enclosed Python expressions with the -e flag:
+You can even manipulate matches using `{}`-enclosed Python expressions with the -e flag:
 
 	# add five to all integers in file
 	../gres/gres -we "\d+" "{\0+5}" file
@@ -36,9 +36,9 @@ You can even manipulate matches using {}-enclosed Python expressions with the -e
 - Windows is not supported (yet)
 
 For the future:
-- option to highlight original capture groups when printing \0
-- implement more of grep's flags
-- multiline mode
+- Option to highlight original capture groups when printing \0
+- Implement more of grep's flags
+- Multiline mode
 
 <!-- markdown is dumb sometimes -->
 
