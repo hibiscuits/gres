@@ -1,0 +1,534 @@
+#!/usr/bin/env python3
+
+"""
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+Morgan (hibiscuits), 2020
+"""
+
+"""
+usage: gres [-h] [-w] [-i] [-r] [-n] [-q] [-g] [-e] [-p] [-H] [-m] [-C num_lines]
+            pattern subst [files [files ...]]
+
+grep, but with replace
+
+positional arguments:
+  pattern
+  subst
+  files
+
+optional arguments:
+  -h, --help    show this help message and exit
+  -w            write substitions to file
+  -i            interactive mode (always write mode, -w is redundant)
+  -r            traverse directory recursively
+  -n            print file names and line numbers (automatic with -r and -i)
+  -q            quiet (only with -w)
+  -g            grep mode; automatically sets the substitution pattern to "\0"
+  -e            exec: perform Python operations matches
+  -p            print each line of input, not just ones with substitutions (overridden by -i and -q)
+  -H            include hidden files and directories (warning: includes .git!)
+  -m            monochrome; no colors or highlighting (automatic if output is redirected)
+  -C num_lines  add [num_lines] of context on either side of each match (overridden by -p and -q)
+
+"""
+
+import re
+import sys
+import glob
+import argparse
+import stat
+import sys
+import os
+from fileinput import FileInput
+import shutil
+
+class Gres:
+
+	# colors
+	reset_style='\033[0m'
+	bold='\033[01m'
+	red='\033[31m'
+	green='\033[32m'
+	orange='\033[33m'
+	blue='\033[34m'
+	purple='\033[35m'
+	cyan='\033[36m'
+	lightred='\033[91m'
+	yellow='\033[93m'
+	lightcyan='\033[96m'
+	group_colors=[orange, blue, green, purple, lightcyan]
+	filename_colors = [purple, blue]
+
+	# interactive mode responses
+	ABORT = 'a'
+	CONTINUE = 'c'
+	LEAVE = 'l'
+	NO = 'n'
+	QUIT = 'q'
+	SKIP = 's'
+
+
+	def __init__(self):
+		self.show_commands = True
+		self.line_num = 0
+		self.last_line_printed = -1
+		self.deletion = False
+		self.file = None
+		self.response = None
+		self.file_handle = None
+		self.lines = None
+		self.read_by_line = True
+		self.filename_color = Gres.filename_colors[0]
+		self.main()
+
+
+	def main(self):
+		"""
+		The main loop
+		"""
+		stdin = not sys.stdin.isatty()
+		hidden = re.compile(r"(^|/)\.\w+$")
+		if not stdin:
+			if args.r:
+				for file in args.files:
+					if not os.path.isdir(file):
+						print(f"gres: {file}: is not a directory", file=sys.stderr)
+						continue
+					if not args.H and hidden.search(file):
+						print(f"gres: {file} is hidden, skipping", file=sys.stderr)
+						continue
+					for root, d_names, f_names in os.walk(file, topdown=True, onerror=None, followlinks=False):
+						if not args.H:
+							# remove hidden files and directories from consideration
+							f_names = [f for f in f_names if not (hidden.search(f) and not print(f"gres: {f} is hidden, skipping", file=sys.stderr))]
+							d_names[:] = [d for d in d_names if not (hidden.search(d) and not print(f"gres: {d} is hidden, skipping", file=sys.stderr))]
+						for f in f_names:
+							filename = os.path.join(root, f)
+							self.file = filename
+							self.read_file(filename)
+							self.filename_color = Gres.filename_colors[int(self.filename_color == Gres.purple)]
+			else:
+				for arg in args.files:
+					for file in glob.iglob(arg):
+						if not os.path.isdir(file):
+							self.file = file
+							self.read_file(file)
+							self.filename_color = Gres.filename_colors[int(self.filename_color == Gres.purple)]
+		else:
+			self.read_stdin()
+
+
+	def read_file(self, file):
+		"""
+		Read in a file, look for matches.  If write mode is on and match is found,
+		call write_file().
+		"""
+		self.read_by_line = True
+		self.line_num = 0
+		if os.path.islink(file): return
+		if stat.S_ISFIFO(os.stat(file).st_mode): return
+		
+		try:
+			with open(file, 'r') as self.file_handle:
+				iterator = self.file_handle
+				if args.C:
+					self.read_all()
+					iterator = self.lines
+				for line in iterator:
+					match = re.search(args.pattern, line)
+					if match:
+						if args.w:
+							if args.i: # interactive mode
+								self.interact(line)
+							if self.read_by_line:
+								if self.response == Gres.SKIP:
+									self.file_handle.close()
+									return							
+								elif self.response == Gres.NO:
+									self.line_num += 1
+									continue
+								elif self.response == Gres.LEAVE:
+									args.i = False
+								elif self.response == Gres.QUIT or self.response == Gres.ABORT:
+									self.file_handle.close()
+									exit(0)
+								self.file_handle.seek(0)
+								self.lines = self.file_handle.readlines()
+								self.file_handle.close()
+							self.write_file(file)
+							break
+						if not args.q: self.print_lines(line, context=args.C)
+					elif args.p:
+						self.print_line(line, original=True)
+					self.line_num += 1
+		except UnicodeDecodeError:
+			print(f"gres: {file}: is not Unicode", file=sys.stderr)
+		except PermissionError:
+			print(f"gres: {file}: Read permission denied", file=sys.stderr)
+		except Exception as e:
+			import traceback
+			print(traceback.format_exc(),  file=sys.stderr)
+
+
+	def read_stdin(self):
+		"""
+		Read lines from stdin
+		"""
+		self.line_num = 0
+		for line in sys.stdin:
+			match = re.search(args.pattern, line)
+			if match:
+				if not args.q: self.print_line(line)
+			self.line_num += 1
+
+
+	def read_all(self):
+		"""
+		Read in all lines of the current file
+		"""
+		self.file_handle.seek(0)
+		self.lines = self.file_handle.readlines()
+		self.file_handle.close()
+		self.read_by_line = False
+
+
+	def write_file(self, file):
+		"""
+		Open a file for writing, write lines up to the current line (we
+		know there were no matches up to that point), then continue
+		searching for matches and writing the substitutions.
+		"""
+		self.read_by_line = False
+		backup = self.create_backup()
+		abort = False
+		cont = self.response == Gres.CONTINUE
+		first_iteration = True
+
+		try:
+			with open(file, 'w') as self.file_handle:
+				self.file_handle.writelines(self.lines[:self.line_num])
+				for line in self.lines[self.line_num:]:
+					self.deletion = False
+					match = re.search(args.pattern, line)
+					if match:
+						if not args.e:
+							colorless_line = re.sub(args.pattern, args.subst, line)
+						else:
+							colorless_line = self.execute(line, False)
+						if args.i and not cont: # interactive mode
+							# we already have the response from read_file() on the 
+							# first iteration, so skip the interact() step once.
+							if first_iteration:
+								first_iteration = False
+							else:
+								self.interact(line)
+							
+							if self.response == Gres.SKIP:
+								self.file_handle.writelines(self.lines[self.line_num:])
+								self.file_handle.close()
+								self.remove_or_restore_backup(backup, abort)
+								return
+							elif self.response == Gres.NO:
+								self.file_handle.write(line)
+								self.line_num += 1
+								continue
+							elif self.response == Gres.CONTINUE:
+								cont = True
+							elif self.response == Gres.LEAVE:
+								args.i = False
+							elif self.response == Gres.ABORT:
+								self.file_handle.close()
+								abort = True
+								self.remove_or_restore_backup(backup, abort)
+								exit(0)
+							elif self.response == Gres.QUIT:
+								self.file_handle.writelines(self.lines[self.line_num:])
+								self.file_handle.close()
+								self.remove_or_restore_backup(backup, abort)
+								exit(0)
+
+						if len(colorless_line):
+							self.file_handle.write(colorless_line)
+							self.lines[self.line_num] = colorless_line
+						else:
+							self.deletion = True
+
+						if not args.q and not args.i:
+							self.print_lines(line, context=args.C)
+						
+						if self.deletion:
+							del self.lines[self.line_num]
+							self.line_num -= 1
+					elif args.w:
+						self.file_handle.write(line)
+						if args.p:
+							self.print_line(line, original=True)
+					self.line_num += 1
+		except PermissionError:
+			print(f"gres: {file}: Write permission denied", file=sys.stderr)
+		except UnicodeDecodeError:
+			abort = True
+			print(f"gres: {file}: is not Unicode", file=sys.stderr)
+		except Exception as e:
+			abort = True
+			import traceback
+			print(traceback.format_exc(),  file=sys.stderr)
+		
+		self.remove_or_restore_backup(backup, abort)
+
+
+	def print_lines(self, line, context=None):
+		"""
+		Print the current line and the specified number of
+		context lines on either side.
+		"""
+		if context:
+			starting_line = (self.line_num) - context
+			if not args.i:
+				if starting_line <= self.last_line_printed:
+					starting_line = self.last_line_printed + 1
+				if self.last_line_printed > -1 and (starting_line > self.last_line_printed + 1 or self.deletion):
+					print('--')
+			else:
+				starting_line = starting_line if starting_line > 0 else 0
+
+			i = starting_line
+			while i < self.line_num:
+				self.print_line(self.lines[i], original=True, line_num=i+1, highlight_match=False)
+				i += 1
+
+		if args.i:
+			self.print_line(line, original=True)
+		else:
+			self.last_line_printed = self.line_num
+		
+		self.print_line(line)
+
+		if context:
+			i = self.line_num + 1
+			while i <= self.line_num + context and i < len(self.lines) and (not re.search(args.pattern, self.lines[i]) or args.i):
+				self.print_line(self.lines[i], original=True, line_num=i+1, highlight_match=False)
+				if not args.i: self.last_line_printed = i
+				i += 1
+
+
+	def execute(self, line, highlight):
+		"""
+		Evaluate {}-enclosed expressions on matches
+		"""
+		line = re.sub(args.pattern, args.subst, line)
+
+		def replace(match):
+			expr = line[match.start()+1:match.end()-1]
+			result = eval(expr)
+			if highlight and not args.m: return Gres.bold + Gres.lightred + str(result) + Gres.reset_style
+			return str(result)
+
+		# find pairs of unescaped curly braces, non-greedily
+		line = re.sub(r'(?<!\\)(?:(\\\\)*)\{.+?(?<!\\)(?:(\\\\)*)\}', replace, line)
+		return line
+
+
+	def print_line(self, line, original=False, line_num=None, highlight_match=True):
+		"""
+		Print a line with the replaced section highlighted (if not -C).  If
+		there are backreferences in the substitution that are not \0, they
+		are highlighted individually.
+		"""
+		local_subst = r'\g<0>' if original else args.subst
+		line_num = line_num if line_num is not None else self.line_num+1
+
+		def colorize_match(match):
+			subst_template = local_subst
+			for i in range(1, len(match.groups())+1):
+				subst_template = re.sub(
+					r'((?<!\\)(?:\\\\){0,})\\' + str(i),
+					r'\1'+ Gres.group_colors[(i-1) % len(Gres.group_colors)] + r'\\' + str(i) + Gres.red,
+					subst_template
+				)
+			match_string = match.expand(subst_template)
+			return Gres.bold + Gres.lightred + match_string + Gres.reset_style
+
+		if not line.endswith('\n'): line += '\n'
+
+		if not args.m or args.e: # catch all args.e instances in this block since execute() handles args.m on its own
+			if args.e and not original:
+				highlighted_line = self.execute(line, highlight_match)
+			else:
+				if highlight_match:
+					if args.pattern.groups:
+						highlighted_line = re.sub(args.pattern, colorize_match, line)
+					else:
+						highlighted_line = re.sub(args.pattern, Gres.bold + Gres.lightred + local_subst + Gres.reset_style, line)
+				else:
+					highlighted_line = re.sub(args.pattern, local_subst, line)
+
+			if args.n:
+				if self.file:
+					print(f"{self.filename_color}{self.file}{Gres.cyan}:{Gres.green}{str(line_num)}{Gres.cyan}:{Gres.reset_style}", end='')
+				else:
+					print(f"{Gres.green}{str(line_num)}{Gres.cyan}:{Gres.reset_style}", end='')
+			print(highlighted_line, end='')
+		else: # colorless
+			if args.n:
+				if self.file:
+					print(f"{self.file}:{str(line_num)}:", end='')
+				else:
+					print(f"{str(line_num)}:", end='')
+			print(re.sub(args.pattern, local_subst, line), end='')
+
+
+	def interact(self, line):
+		"""
+		Loop for prompting and accepting input in interactive mode
+		"""
+		valid_commands = {
+			'yes': 'perform replacement',
+			'no': 'do not perform replacement',
+			'skip': 'do not perform currect replacement, and skip the rest of this file',
+			'continue': 'perform currect replacement, as well as the rest in this file',
+			'leave': 'leave interactive mode and perform the rest of the replacements',
+			'abort': 'restore this file\'s backup and quit',
+			'print': 'print the current line and its potential replacement again, each time with more context',
+			'help': 'print this message',
+			'quit': 'quit',
+		}
+		
+		def print_commands():
+			yellow = Gres.yellow if not args.m else ''
+			reset = Gres.reset_style if not args.m else ''
+			print('* '*30)
+			for command in valid_commands.keys():
+				print(f"({yellow}{command[0]}{reset}){command[1:]}{' '*(10-len(command))}: {valid_commands[command]}")
+			print('* '*30)
+
+		if self.show_commands:
+			print_commands()
+			self.show_commands = False
+		
+		context = 0 if not args.C else args.C
+		self.print_lines(line, context)
+		self.response = ''
+		proceed = False
+		full_commands = valid_commands.keys()
+		short_commands = [command[0] for command in full_commands]
+		
+		while not proceed:
+			self.response = input('> ')
+			if not self.response:
+				continue
+			self.response = self.response.lower()
+			if (self.response not in full_commands and self.response not in short_commands) or self.response in ['h', 'help']:
+				print_commands()
+			elif self.response in ['p', 'print']:
+				context += 1
+				if self.read_by_line:
+					# might as well read in the whole thing now,
+					# since we need to read ahead and behind
+					self.read_all()
+				self.print_lines(line, context)
+			else:
+				self.response = self.response[0]
+				proceed = True
+
+
+	def create_backup(self):
+		"""
+		Copy file that is about to be opened for writing to a backup named
+		{filename}.gresbak.  If {filename.gresbak} exists, add another .gresbak
+		until we have an unused name.
+		"""
+		extension = '.gresbak'
+		backup = self.file + extension
+		iteration = 1
+		while os.path.exists(backup):
+			backup = self.file + extension + str(iteration)
+			iteration += 1
+		shutil.copy2(self.file, backup)
+		return backup
+
+
+	def remove_or_restore_backup(self, backup, abort):
+		"""
+		If abort is True, that means the write process was either manually aborted or
+		an exception occured during the write, so restore the backup.  Otherwise,
+		remove the backup.
+		"""
+		if backup:
+			if not abort:
+				os.remove(backup)
+			else:
+				print(f"gres: restoring backup of {self.file}", file=sys.stderr)
+				shutil.copy2(backup, self.file)
+
+
+if __name__ == "__main__":
+	"""
+	Runs when program is invoked directly
+	"""
+
+	if (len(sys.argv) == 1):
+		sys.argv.append('-h')
+
+	parser = argparse.ArgumentParser(description='grep, but with replace')
+	parser.add_argument("-w", help="write substitions to file", action="store_true")
+	parser.add_argument("-i", help="interactive mode (always write mode, -w is redundant)", action="store_true")
+	parser.add_argument("-r", help="traverse directory recursively", action="store_true")
+	parser.add_argument("-n", help="print file names and line numbers (automatic with -r and -i)", action="store_true")
+	parser.add_argument("-q", help="quiet (only with -w)", action="store_true")
+	parser.add_argument('-g', help="grep mode; automatically sets the substitution pattern to \"\\0\"", action="store_true")
+	parser.add_argument("-e", help="exec: perform Python operations matches", action="store_true")
+	parser.add_argument("-p", help="print each line of input, not just ones with substitutions (overridden by -i and -q)", action="store_true")
+	parser.add_argument("-H", help="include hidden files and directories (warning: includes .git!)", action="store_true")
+	parser.add_argument("-m", help="monochrome; no colors or highlighting (automatic if output is redirected)", action="store_true")
+	parser.add_argument('-C', metavar="num_lines", help="add [num_lines] of context on either side of each match (overridden by -p and -q)", type=int)
+	parser.add_argument("pattern")
+	parser.add_argument("subst")
+	parser.add_argument("files", nargs="*")
+	args = parser.parse_args()
+
+	if args.i:
+		args.w = True
+		args.n = True
+		args.p = False
+
+	if args.r:
+		args.n = True
+	
+	if not args.w:
+		args.q = False
+
+	if args.q:
+		args.p = False
+
+	if args.q or args.p:
+		args.C = None
+
+	# we don't want negative lines of context
+	if args.C is not None:
+		args.C = abs(args.C)
+
+	# we don't want colors if output is redirected
+	if not sys.stdout.isatty():
+		args.m = True
+
+	if args.g:
+		args.files = [args.subst] + args.files
+		args.subst = r"\0"
+
+	if len(args.files) > 1:
+		args.n = True
+
+	args.pattern = re.compile(args.pattern)
+	args.subst = re.sub(r'((?<!\\)(?:\\\\){0,})\\0', r'\1\\g<0>', args.subst) # why do they make me do this
+	gres = Gres()
