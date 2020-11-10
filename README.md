@@ -36,7 +36,7 @@ You can even manipulate matches using `{}`-enclosed Python expressions with the 
 - Windows is not supported (yet)
 
 For the future:
-- Option to highlight original capture groups when printing \0
+- Option to highlight original capture groups when printing `\0`
 - Implement more of grep's flags
 - Multiline mode
 
