@@ -27,7 +27,7 @@ or the shorthand version,
 
 You can even manipulate matches using `{}`-enclosed Python expressions with the -e flag:
 
-	# add 5 to all integers in `file`
+	# add 5 to all integers in file
 	gres -we "\d+" "{\0+5}" file
 
 - When writing, it automatically creates a backup of the file and then removes it if the write completed without errors.  If an error is encountered, it attempts to restore the backup.  
