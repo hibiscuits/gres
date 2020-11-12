@@ -127,7 +127,9 @@ class Gres:
 							self.read_file(file)
 							self.filename_color = Gres.filename_colors[int(self.filename_color == Gres.purple)]
 		else:
-			self.read_stdin()
+			args.w = False
+			args.i = False
+			self.read_file(sys.stdin)
 
 
 	def read_file(self, file):
@@ -137,14 +139,16 @@ class Gres:
 		"""
 		self.read_by_line = True
 		self.line_num = 0
-		if os.path.islink(file): return
-		if stat.S_ISFIFO(os.stat(file).st_mode): return
+		stdin = file is sys.stdin
+		if not stdin:
+			if os.path.islink(file): return
+			if stat.S_ISFIFO(os.stat(file).st_mode): return
 		
 		try:
-			with open(file, 'r') as self.file_handle:
+			with open(file if not stdin else 0, 'r') as self.file_handle:
 				iterator = self.file_handle
 				if args.C:
-					self.read_all()
+					self.read_all(stdin=stdin)
 					iterator = self.lines
 				for line in iterator:
 					match = re.search(args.pattern, line)
@@ -182,26 +186,18 @@ class Gres:
 			print(traceback.format_exc(),  file=stderr)
 
 
-	def read_stdin(self):
-		"""
-		Read lines from stdin
-		"""
-		self.line_num = 0
-		for line in sys.stdin:
-			match = re.search(args.pattern, line)
-			if match:
-				if not args.q: self.print_line(line)
-			self.line_num += 1
-
-
-	def read_all(self):
+	def read_all(self, stdin=False):
 		"""
 		Read in all lines of the current file
 		"""
-		self.file_handle.seek(0)
-		self.lines = self.file_handle.readlines()
-		self.file_handle.close()
-		self.read_by_line = False
+		if not stdin:
+			self.file_handle.seek(0)
+			self.lines = self.file_handle.readlines()
+			self.file_handle.close()
+			self.read_by_line = False
+		else:
+			self.lines = sys.stdin.readlines()
+			self.read_by_line = False
 
 
 	def write_file(self, file):
@@ -512,8 +508,8 @@ if __name__ == "__main__":
 	parser.add_argument("-s", help="supress STDERR output", action="store_true")
 	parser.add_argument('-C', metavar="num_lines", help="add [num_lines] of context on either side of each match (overridden by -p and -q)", type=int)
 	parser.add_argument("pattern")
-	parser.add_argument("subst")
-	parser.add_argument("files", nargs="*")
+	parser.add_argument("subst", nargs="?", default=r"\0")
+	parser.add_argument("files", nargs="*", default=['.'])
 	args = parser.parse_args()
 
 	if args.i:
@@ -557,4 +553,5 @@ if __name__ == "__main__":
 
 	args.pattern = re.compile(args.pattern)
 	args.subst = re.sub(r'((?<!\\)(?:\\\\){0,})\\0', r'\1\\g<0>', args.subst) # why do they make me do this
+
 	gres = Gres()
