@@ -52,6 +52,8 @@ import os
 from fileinput import FileInput
 import shutil
 
+stderr = sys.stderr
+
 class Gres:
 
 	# colors
@@ -102,16 +104,16 @@ class Gres:
 			if args.r:
 				for file in args.files:
 					if not os.path.isdir(file):
-						print(f"gres: {file}: is not a directory", file=sys.stderr)
+						print(f"gres: {file}: is not a directory", file=stderr)
 						continue
 					if not args.H and hidden.search(file):
-						print(f"gres: {file} is hidden, skipping", file=sys.stderr)
+						print(f"gres: {file} is hidden, skipping", file=stderr)
 						continue
 					for root, d_names, f_names in os.walk(file, topdown=True, onerror=None, followlinks=False):
 						if not args.H:
 							# remove hidden files and directories from consideration
-							f_names = [f for f in f_names if not (hidden.search(f) and not print(f"gres: {f} is hidden, skipping", file=sys.stderr))]
-							d_names[:] = [d for d in d_names if not (hidden.search(d) and not print(f"gres: {d} is hidden, skipping", file=sys.stderr))]
+							f_names = [f for f in f_names if not (hidden.search(f) and not print(f"gres: {f} is hidden, skipping", file=stderr))]
+							d_names[:] = [d for d in d_names if not (hidden.search(d) and not print(f"gres: {d} is hidden, skipping", file=stderr))]
 						for f in f_names:
 							filename = os.path.join(root, f)
 							self.file = filename
@@ -172,12 +174,12 @@ class Gres:
 						self.print_line(line, original=True)
 					self.line_num += 1
 		except UnicodeDecodeError:
-			print(f"gres: {file}: is not Unicode", file=sys.stderr)
+			print(f"gres: {file}: is not Unicode", file=stderr)
 		except PermissionError:
-			print(f"gres: {file}: Read permission denied", file=sys.stderr)
+			print(f"gres: {file}: Read permission denied", file=stderr)
 		except Exception as e:
 			import traceback
-			print(traceback.format_exc(),  file=sys.stderr)
+			print(traceback.format_exc(),  file=stderr)
 
 
 	def read_stdin(self):
@@ -211,7 +213,7 @@ class Gres:
 		self.read_by_line = False
 		backup = self.create_backup()
 		if not backup:
-			print(f"gres: {file}: Unable to create backup, skipping", file=sys.stderr)
+			print(f"gres: {file}: Unable to create backup, skipping", file=stderr)
 			return
 		abort = False
 		cont = self.response == Gres.CONTINUE
@@ -278,14 +280,14 @@ class Gres:
 							self.print_line(line, original=True)
 					self.line_num += 1
 		except PermissionError:
-			print(f"gres: {file}: Write permission denied", file=sys.stderr)
+			print(f"gres: {file}: Write permission denied", file=stderr)
 		except UnicodeDecodeError:
 			abort = True
-			print(f"gres: {file}: is not Unicode", file=sys.stderr)
+			print(f"gres: {file}: is not Unicode", file=stderr)
 		except Exception as e:
 			abort = True
 			import traceback
-			print(traceback.format_exc(),  file=sys.stderr)
+			print(traceback.format_exc(),  file=stderr)
 		
 		self.remove_or_restore_backup(backup, abort)
 
@@ -338,7 +340,7 @@ class Gres:
 				result = eval(expr)
 			except Exception as e:
 				import traceback
-				print(traceback.format_exc(),  file=sys.stderr)
+				print(traceback.format_exc(),  file=stderr)
 				error = True
 			
 			if error: raise RuntimeError("Exception raised during 'exec' block")
@@ -483,7 +485,7 @@ class Gres:
 			if not abort:
 				os.remove(backup)
 			else:
-				print(f"gres: restoring backup of {self.file}", file=sys.stderr)
+				print(f"gres: restoring backup of {self.file}", file=stderr)
 				shutil.copy2(backup, self.file)
 
 
@@ -498,6 +500,7 @@ if __name__ == "__main__":
 	parser = argparse.ArgumentParser(description='grep, but with replace')
 	parser.add_argument("-w", help="write substitions to file", action="store_true")
 	parser.add_argument("-i", help="interactive mode (always write mode, -w is redundant)", action="store_true")
+	parser.add_argument("-c", help="case insensitive (sorry, -i was already taken)", action="store_true")
 	parser.add_argument("-r", help="traverse directory recursively", action="store_true")
 	parser.add_argument("-n", help="print file names and line numbers (automatic with -r and -i)", action="store_true")
 	parser.add_argument("-q", help="quiet (only with -w)", action="store_true")
@@ -506,6 +509,7 @@ if __name__ == "__main__":
 	parser.add_argument("-p", help="print each line of input, not just ones with substitutions (overridden by -i and -q)", action="store_true")
 	parser.add_argument("-H", help="include hidden files and directories (warning: includes .git!)", action="store_true")
 	parser.add_argument("-m", help="monochrome; no colors or highlighting (automatic if output is redirected)", action="store_true")
+	parser.add_argument("-s", help="supress STDERR output", action="store_true")
 	parser.add_argument('-C', metavar="num_lines", help="add [num_lines] of context on either side of each match (overridden by -p and -q)", type=int)
 	parser.add_argument("pattern")
 	parser.add_argument("subst")
@@ -519,6 +523,9 @@ if __name__ == "__main__":
 
 	if args.r:
 		args.n = True
+
+	if args.c:
+		args.pattern = '(?i)' + args.pattern
 	
 	if not args.w:
 		args.q = False
@@ -528,6 +535,10 @@ if __name__ == "__main__":
 
 	if args.q or args.p:
 		args.C = None
+
+	if args.s:
+		f = open(os.devnull, 'w')
+		stderr = f
 
 	# we don't want negative lines of context
 	if args.C is not None:
