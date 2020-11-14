@@ -117,35 +117,36 @@ class Gres:
 						for f in f_names:
 							filename = os.path.join(root, f)
 							self.file = filename
-							self.read_file(filename)
+							self.read_file()
 							self.filename_color = Gres.filename_colors[int(self.filename_color == Gres.purple)]
 			else:
 				for arg in args.files:
 					for file in glob.iglob(arg):
 						if not os.path.isdir(file):
 							self.file = file
-							self.read_file(file)
+							self.read_file()
 							self.filename_color = Gres.filename_colors[int(self.filename_color == Gres.purple)]
 		else:
 			args.w = False
 			args.i = False
-			self.read_file(sys.stdin)
+			self.file = sys.stdin
+			self.read_file()
 
 
-	def read_file(self, file):
+	def read_file(self):
 		"""
 		Read in a file, look for matches.  If write mode is on and match is found,
 		call write_file().
 		"""
 		self.read_by_line = True
 		self.line_num = 0
-		stdin = file is sys.stdin
+		stdin = self.file is sys.stdin
 		if not stdin:
-			if os.path.islink(file): return
-			if stat.S_ISFIFO(os.stat(file).st_mode): return
+			if os.path.islink(self.file): return
+			if stat.S_ISFIFO(os.stat(self.file).st_mode): return
 		
 		try:
-			with open(file if not stdin else 0, 'r') as self.file_handle:
+			with open(self.file if not stdin else 0, 'r') as self.file_handle:
 				iterator = self.file_handle
 				if args.C:
 					self.read_all(stdin=stdin)
@@ -171,16 +172,16 @@ class Gres:
 								self.file_handle.seek(0)
 								self.lines = self.file_handle.readlines()
 								self.file_handle.close()
-							self.write_file(file)
+							self.write_file(self.file)
 							break
 						if not args.q: self.print_lines(line, context=args.C)
 					elif args.p:
 						self.print_line(line, original=True)
 					self.line_num += 1
 		except UnicodeDecodeError:
-			print(f"gres: {file}: is not Unicode", file=stderr)
+			print(f"gres: {self.file}: is not Unicode", file=stderr)
 		except PermissionError:
-			print(f"gres: {file}: Read permission denied", file=stderr)
+			print(f"gres: {self.file}: Read permission denied", file=stderr)
 		except Exception as e:
 			import traceback
 			print(traceback.format_exc(),  file=stderr)
