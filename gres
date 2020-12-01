@@ -332,6 +332,7 @@ class Gres:
 		error = False
 		
 		def replace(match):
+			nonlocal error
 			expr = line[match.start()+1:match.end()-1]
 			try:
 				result = eval(expr)
@@ -556,3 +557,4 @@ if __name__ == "__main__":
 	args.subst = re.sub(r'((?<!\\)(?:\\\\){0,})\\0', r'\1\\g<0>', args.subst) # why do they make me do this
 
 	gres = Gres()
+	
