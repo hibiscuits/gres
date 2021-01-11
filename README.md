@@ -33,7 +33,7 @@ You can even manipulate matches using `{}`-enclosed Python expressions with the 
 - When writing, it automatically creates a backup of the file and then removes it if the write completed without errors.  If an error is encountered, it attempts to restore the backup.  
 - Also includes an interactive mode where you can decide, for each matched line, whether to replace it or skip it.
 - Requirements: Python 3
-- Windows is not supported (yet)
+- Not Windows
 
 For the future:
 - Option to highlight original capture groups when printing `\0`

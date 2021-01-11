@@ -284,7 +284,7 @@ class Gres:
 		except Exception as e:
 			abort = True
 			import traceback
-			print(traceback.format_exc(),  file=stderr)
+			print(traceback.format_exc(), file=stderr)
 		
 		self.remove_or_restore_backup(backup, abort)
 
